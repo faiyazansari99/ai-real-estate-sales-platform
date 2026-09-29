@@ -1,0 +1,28 @@
+# Environment secrets
+.env
+.env.local
+.env.*.local
+
+# Local database
+data/db.json
+data/*.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
