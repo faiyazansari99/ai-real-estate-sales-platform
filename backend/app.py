@@ -325,7 +325,9 @@ class Login(BaseModel):
     username: str
     password: str
     remember: bool = False
-    class CustomerSignup(BaseModel):
+
+
+class CustomerSignup(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=3, max_length=254)
     phone: str = Field(min_length=5, max_length=30)
@@ -339,15 +341,18 @@ class Login(BaseModel):
             raise ValueError('Invalid email address')
         return v
 
+
 class CustomerLogin(BaseModel):
     email: str
     password: str = Field(min_length=1, max_length=128)
+
 
 class Chat(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     session_id: str = 'public'
     property_id: str = ''
     image_data: str = ''
+
 
 class Lead(BaseModel):
     name: str = Field(min_length=2)
@@ -360,7 +365,6 @@ class Lead(BaseModel):
     source: str = 'Website'
     consent: bool = True
     customer_id: str = ''
-
 class Visit(BaseModel):
     name: str = Field(min_length=2)
     phone: str = Field(min_length=5)
