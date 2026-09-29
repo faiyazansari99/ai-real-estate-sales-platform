@@ -207,7 +207,7 @@ def groq(messages, model=None, image_data=None):
     key = os.getenv('GROQ_API_KEY', '').strip()
     if not key:
         return None
-    model = model or os.getenv('GROQ_TEXT_MODEL', 'llama-3.3-70b-versatile')
+    model = model = model or os.getenv('GROQ_TEXT_MODEL', 'openai/gpt-oss-120b')
     if image_data:
         messages = [dict(m) for m in messages]
         last = messages[-1]
