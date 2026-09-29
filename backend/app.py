@@ -1,4 +1,4 @@
-import os, json, uuid, hmac, hashlib, base64, re, copy
+import os, json, uuid, hmac, hashlib, base64, re, copy, threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -37,6 +37,7 @@ if not OWNER_PASS:
 
 ph = PasswordHasher()
 _SESSION_CACHE = {}
+_SESSION_LOCK = threading.Lock()
 
 DEFAULT = {
     'settings': {
@@ -53,9 +54,15 @@ DEFAULT = {
         'address': '',
         'logo_url': '',
         'hero_image': '',
-        'ai_business_context': 'You are a professional real-estate sales assistant with 20 years of experience. Be warm, concise and helpful. Use only published property data and public business settings. Never invent property facts, price, availability, location, owner details or legal claims. You may also give general real estate guidance on buying vs renting, home loans, registration process, vastu tips, and locality insights. Reply in the same language the customer uses (English, Hindi, Hinglish, Marathi, Tamil, etc.). Help customers search, compare, enquire and book site visits.'
+        'ai_business_context': 'You are a professional real-estate sales assistant with 20 years of experience. Be warm, concise and helpful. Use only published property data and public business settings. Never invent property facts, price, availability, location, owner details or legal claims. You may also give general real estate guidance on buying vs renting, home loans, registration process, vastu tips, and locality insights. Always reply in the same language the customer uses. Help customers search, compare, enquire and book site visits.'
     },
-    'properties': [],
+    'properties': [
+        {'purpose': 'Buy', 'type': 'Apartment', 'price': 7200000, 'bhk': '2 BHK', 'bathrooms': '2', 'area': '1,120 sq ft', 'built_up_area': '', 'plot_area': '', 'floor': '', 'total_floors': '', 'location': 'Hinjewadi Phase 2, Pune, Maharashtra', 'locality': 'Hinjewadi', 'city': 'Pune', 'state': 'Maharashtra', 'pincode': '', 'map_url': 'https://maps.google.com/?q=Hinjewadi+Phase+2+Pune+Maharashtra', 'status': 'Ready to Move', 'facing': '', 'furnishing': '', 'parking': '', 'construction_year': '', 'rera': '', 'amenities': ['Clubhouse', 'Gym', 'Pool', 'Security', 'Power Backup'], 'description': 'Modern demo 2 BHK apartment for client presentation. Replace with verified property information before launch.', 'published': True, 'views': 24, 'is_demo': True, 'id': 'demo_p1', 'title': 'Skyline Residency — Demo Listing', 'images': [{'id': 'demo_img_1', 'name': 'demo-property.svg', 'url': '', 'data': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MDAgNDAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzM2NWY0YiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzEwMWYxOCIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iNDAwIiBmaWxsPSJ1cmwoI2cpIi8+PGNpcmNsZSBjeD0iNDkwIiBjeT0iNzAiIHI9IjQyIiBmaWxsPSIjZjVlN2IwIiBvcGFjaXR5PSIuOCIvPjxwYXRoIGQ9Ik0wIDM0NSBRMTQwIDI5NSAyODAgMzQwIFQ2MDAgMzI1IFY0MDAgSDBaIiBmaWxsPSIjMzE1NTQ1IiBvcGFjaXR5PSIuOSIvPjxyZWN0IHg9IjE2NSIgeT0iODAiIHdpZHRoPSIyNzAiIGhlaWdodD0iMzEwIiByeD0iMTAiIGZpbGw9IiNkZmU5ZTMiLz48ZyBmaWxsPSIjOGRhOTllIj48cmVjdCB4PSIxOTUiIHk9IjExNSIgd2lkdGg9IjU1IiBoZWlnaHQ9IjQ1Ii8+PHJlY3QgeD0iMjg1IiB5PSIxMTUiIHdpZHRoPSI1NSIgaGVpZ2h0PSI0NSIvPjxyZWN0IHg9IjM3NSIgeT0iMTE1IiB3aWR0aD0iMzUiIGhlaWdodD0iNDUiLz48cmVjdCB4PSIxOTUiIHk9IjE5MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjQ1Ii8+PHJlY3QgeD0iMjg1IiB5PSIxOTAiIHdpZHRoPSI1NSIgaGVpZ2h0PSI0NSIvPjxyZWN0IHg9IjM3NSIgeT0iMTkwIiB3aWR0aD0iMzUiIGhlaWdodD0iNDUiLz48cmVjdCB4PSIxOTUiIHk9IjI2NSIgd2lkdGg9IjU1IiBoZWlnaHQ9IjQ1Ii8+PHJlY3QgeD0iMjg1IiB5PSIyNjUiIHdpZHRoPSI1NSIgaGVpZ2h0PSI0NSIvPjxyZWN0IHg9IjM3NSIgeT0iMjY1IiB3aWR0aD0iMzUiIGhlaWdodD0iNDUiLz48L2c+PHJlY3QgeD0iMjc1IiB5PSIzMzAiIHdpZHRoPSI1MCIgaGVpZ2h0PSI2MCIgZmlsbD0iIzgyOWU4ZiIvPjx0ZXh0IHg9IjMwIiB5PSI0NSIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyMCIgZm9udC13ZWlnaHQ9IjcwMCI+REVNTyBMSVNUSU5HPC90ZXh0Pjx0ZXh0IHg9IjMwIiB5PSIzNzAiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTciIGZvbnQtd2VpZ2h0PSI3MDAiPlNreWxpbmUgUmVzaWRlbmN5PC90ZXh0Pjx0ZXh0IHg9IjMwIiB5PSIzOTIiIGZpbGw9IiNkY2ViZTMiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxMiI+TW9kZXJuIDIgQkhLIOKAoiBQdW5lPC90ZXh0Pjwvc3ZnPg=='}]},
+        {'purpose': 'Buy', 'type': 'Villa', 'price': 18500000, 'bhk': '4 BHK', 'bathrooms': '4', 'area': '2,850 sq ft', 'built_up_area': '', 'plot_area': '', 'floor': '', 'total_floors': '', 'location': 'Dona Paula, Panaji, Goa', 'locality': 'Dona Paula', 'city': 'Panaji', 'state': 'Goa', 'pincode': '', 'map_url': 'https://maps.google.com/?q=Dona+Paula+Panaji+Goa', 'status': 'Ready to Move', 'facing': '', 'furnishing': '', 'parking': '', 'construction_year': '', 'rera': '', 'amenities': ['Private Garden', 'Pool', 'Terrace', 'Security', 'Parking'], 'description': 'Premium demo villa for client presentation. Replace demo information with verified owner data before publishing.', 'published': True, 'views': 20, 'is_demo': True, 'id': 'demo_p2', 'title': 'Palm Grove Villa — Demo Listing', 'images': [{'id': 'demo_img_2', 'name': 'demo-property.svg', 'url': '', 'data': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MDAgNDAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzVhNzI1YyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzFiMzAyNSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iNDAwIiBmaWxsPSJ1cmwoI2cpIi8+PGNpcmNsZSBjeD0iNDkwIiBjeT0iNzAiIHI9IjQyIiBmaWxsPSIjZjVlN2IwIiBvcGFjaXR5PSIuOCIvPjxwYXRoIGQ9Ik0wIDM0NSBRMTQwIDI5NSAyODAgMzQwIFQ2MDAgMzI1IFY0MDAgSDBaIiBmaWxsPSIjMzE1NTQ1IiBvcGFjaXR5PSIuOSIvPjxwYXRoIGQ9Ik0xNzAgMjMwIEwzMDAgMTIwIEw0MzAgMjMwIFYzOTAgSDE3MCBaIiBmaWxsPSIjZTllZmU5Ii8+PHBhdGggZD0iTTE0NSAyMzAgTDMwMCAxMDAgTDQ1NSAyMzAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxNCIvPjxyZWN0IHg9IjI1NSIgeT0iMjg1IiB3aWR0aD0iOTAiIGhlaWdodD0iMTA1IiBmaWxsPSIjN2Y5YzhjIi8+PHJlY3QgeD0iMTk1IiB5PSIyNTUiIHdpZHRoPSI0OCIgaGVpZ2h0PSI0NSIgZmlsbD0iI2I5ZDhjOCIvPjxyZWN0IHg9IjM1NyIgeT0iMjU1IiB3aWR0aD0iNDgiIGhlaWdodD0iNDUiIGZpbGw9IiNiOWQ4YzgiLz48dGV4dCB4PSIzMCIgeT0iNDUiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMjAiIGZvbnQtd2VpZ2h0PSI3MDAiPkRFTU8gTElTVElORzwvdGV4dD48dGV4dCB4PSIzMCIgeT0iMzcwIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE3IiBmb250LXdlaWdodD0iNzAwIj5QYWxtIEdyb3ZlIFZpbGxhPC90ZXh0Pjx0ZXh0IHg9IjMwIiB5PSIzOTIiIGZpbGw9IiNkY2ViZTMiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxMiI+THV4dXJ5IDQgQkhLIOKAoiBHb2E8L3RleHQ+PC9zdmc+'}]},
+        {'purpose': 'Rent', 'type': 'House', 'price': 55000, 'bhk': '3 BHK', 'bathrooms': '3', 'area': '1,980 sq ft', 'built_up_area': '', 'plot_area': '', 'floor': '', 'total_floors': '', 'location': 'Whitefield, Bengaluru, Karnataka', 'locality': 'Whitefield', 'city': 'Bengaluru', 'state': 'Karnataka', 'pincode': '', 'map_url': 'https://maps.google.com/?q=Whitefield+Bengaluru+Karnataka', 'status': 'Ready to Move', 'facing': '', 'furnishing': '', 'parking': '', 'construction_year': '', 'rera': '', 'amenities': ['Gated Community', 'Garden', 'Security', 'Water Supply', 'Parking'], 'description': 'Demo rental home for presentation. Replace all facts with verified listing information before launch.', 'published': True, 'views': 16, 'is_demo': True, 'id': 'demo_p3', 'title': 'Maple Family Home — Demo Listing', 'images': [{'id': 'demo_img_3', 'name': 'demo-property.svg', 'url': '', 'data': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MDAgNDAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzdhNmI1OSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzJkM2IzMCIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iNDAwIiBmaWxsPSJ1cmwoI2cpIi8+PGNpcmNsZSBjeD0iNDkwIiBjeT0iNzAiIHI9IjQyIiBmaWxsPSIjZjVlN2IwIiBvcGFjaXR5PSIuOCIvPjxwYXRoIGQ9Ik0wIDM0NSBRMTQwIDI5NSAyODAgMzQwIFQ2MDAgMzI1IFY0MDAgSDBaIiBmaWxsPSIjMzE1NTQ1IiBvcGFjaXR5PSIuOSIvPjxwYXRoIGQ9Ik0xNTAgMjI1IEwzMDAgMTA1IEw0NTAgMjI1IFYzOTAgSDE1MCBaIiBmaWxsPSIjZjBlN2Q3Ii8+PHBhdGggZD0iTTEzMCAyMjUgTDMwMCA5MCBMNDcwIDIyNSIgZmlsbD0iI2I2N2I1NSIvPjxyZWN0IHg9IjI2NSIgeT0iMjkwIiB3aWR0aD0iNzAiIGhlaWdodD0iMTAwIiBmaWxsPSIjN2U5YzhiIi8+PHJlY3QgeD0iMTg1IiB5PSIyNjAiIHdpZHRoPSI1MCIgaGVpZ2h0PSI0OCIgZmlsbD0iIzkxYjVhYSIvPjxyZWN0IHg9IjM2NSIgeT0iMjYwIiB3aWR0aD0iNTAiIGhlaWdodD0iNDgiIGZpbGw9IiM5MWI1YWEiLz48dGV4dCB4PSIzMCIgeT0iNDUiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMjAiIGZvbnQtd2VpZ2h0PSI3MDAiPkRFTU8gTElTVElORzwvdGV4dD48dGV4dCB4PSIzMCIgeT0iMzcwIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE3IiBmb250LXdlaWdodD0iNzAwIj5NYXBsZSBGYW1pbHkgSG9tZTwvdGV4dD48dGV4dCB4PSIzMCIgeT0iMzkyIiBmaWxsPSIjZGNlYmUzIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiPlNwYWNpb3VzIDMgQkhLIOKAoiBCZW5nYWx1cnU8L3RleHQ+PC9zdmc+'}]},
+        {'purpose': 'Buy', 'type': 'Plot', 'price': 4200000, 'bhk': '', 'bathrooms': '', 'area': '2,400 sq ft', 'built_up_area': '', 'plot_area': '', 'floor': '', 'total_floors': '', 'location': 'Trimbak Road, Nashik, Maharashtra', 'locality': 'Trimbak Road', 'city': 'Nashik', 'state': 'Maharashtra', 'pincode': '', 'map_url': 'https://maps.google.com/?q=Trimbak+Road+Nashik+Maharashtra', 'status': 'Ready to Move', 'facing': '', 'furnishing': '', 'parking': '', 'construction_year': '', 'rera': '', 'amenities': ['Road Access', 'Electricity Nearby', 'Water Nearby'], 'description': 'Demo plot listing. Verify title, zoning, ownership and approvals before any real transaction.', 'published': True, 'views': 12, 'is_demo': True, 'id': 'demo_p4', 'title': 'Greenfield Plot — Demo Listing', 'images': [{'id': 'demo_img_4', 'name': 'demo-property.svg', 'url': '', 'data': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MDAgNDAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzRmNzQ0ZiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE1MjIxOCIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iNDAwIiBmaWxsPSJ1cmwoI2cpIi8+PGNpcmNsZSBjeD0iNDkwIiBjeT0iNzAiIHI9IjQyIiBmaWxsPSIjZjVlN2IwIiBvcGFjaXR5PSIuOCIvPjxwYXRoIGQ9Ik0wIDM0NSBRMTQwIDI5NSAyODAgMzQwIFQ2MDAgMzI1IFY0MDAgSDBaIiBmaWxsPSIjMzE1NTQ1IiBvcGFjaXR5PSIuOSIvPjxwb2x5Z29uIHBvaW50cz0iMTQ1LDM0MCAyMzAsMTY1IDQyNSwxODUgNDcwLDM0NSIgZmlsbD0iIzlkYmI4MiIvPjxwYXRoIGQ9Ik0xNDUgMzQwIEwyMzAgMTY1IEw0MjUgMTg1IEw0NzAgMzQ1IFoiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2YyZjZlZSIgc3Ryb2tlLXdpZHRoPSI4Ii8+PGNpcmNsZSBjeD0iMjEwIiBjeT0iMjQ1IiByPSIyNSIgZmlsbD0iIzU0NzQ1MSIvPjxjaXJjbGUgY3g9IjQwNSIgY3k9IjI2NSIgcj0iMzAiIGZpbGw9IiM1NDc0NTEiLz48dGV4dCB4PSIzMCIgeT0iNDUiIGZpbGw9IndoaXRlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMjAiIGZvbnQtd2VpZ2h0PSI3MDAiPkRFTU8gTElTVElORzwvdGV4dD48dGV4dCB4PSIzMCIgeT0iMzcwIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE3IiBmb250LXdlaWdodD0iNzAwIj5HcmVlbmZpZWxkIFBsb3Q8L3RleHQ+PHRleHQgeD0iMzAiIHk9IjM5MiIgZmlsbD0iI2RjZWJlMyIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIj5SZXNpZGVudGlhbCBwbG90IOKAoiBOYXNoaWs8L3RleHQ+PC9zdmc+'}]},
+{'purpose': 'Commercial', 'type': 'Commercial', 'price': 9500000, 'bhk': '', 'bathrooms': '2', 'area': '1,650 sq ft', 'built_up_area': '', 'plot_area': '', 'floor': '', 'total_floors': '', 'location': 'Andheri East, Mumbai, Maharashtra', 'locality': 'Andheri East', 'city': 'Mumbai', 'state': 'Maharashtra', 'pincode': '', 'map_url': 'https://maps.google.com/?q=Andheri+East+Mumbai+Maharashtra', 'status': 'Ready to Move', 'facing': '', 'furnishing': '', 'parking': '', 'construction_year': '', 'rera': '', 'amenities': ['Lift', 'Reception', 'Security', 'Parking', 'Power Backup'], 'description': 'Demo commercial listing for client presentation. Replace all facts with verified commercial property information before launch.', 'published': True, 'views': 8, 'is_demo': True, 'id': 'demo_p5', 'title': 'Central Business Hub — Demo Listing', 'images': [{'id': 'demo_img_5', 'name': 'demo-property.svg', 'url': '', 'data': 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2MDAgNDAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzRiNjY3MCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE1MWUyNSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSI2MDAiIGhlaWdodD0iNDAwIiBmaWxsPSJ1cmwoI2cpIi8+PGNpcmNsZSBjeD0iNDkwIiBjeT0iNzAiIHI9IjQyIiBmaWxsPSIjZjVlN2IwIiBvcGFjaXR5PSIuOCIvPjxwYXRoIGQ9Ik0wIDM0NSBRMTQwIDI5NSAyODAgMzQwIFQ2MDAgMzI1IFY0MDAgSDBaIiBmaWxsPSIjMzE1NTQ1IiBvcGFjaXR5PSIuOSIvPjxyZWN0IHg9IjEyNSIgeT0iMTQ1IiB3aWR0aD0iMzUwIiBoZWlnaHQ9IjIyMCIgcng9IjEwIiBmaWxsPSIjZDllNWRmIi8+PHJlY3QgeD0iMTU1IiB5PSIxODAiIHdpZHRoPSI5MCIgaGVpZ2h0PSIxNTAiIGZpbGw9IiM5YWI1YWEiLz48cmVjdCB4PSIyNzAiIHk9IjE4MCIgd2lkdGg9IjkwIiBoZWlnaHQ9IjE1MCIgZmlsbD0iIzhkYTk5ZSIvPjxyZWN0IHg9IjM4NSIgeT0iMTgwIiB3aWR0aD0iNjAiIGhlaWdodD0iMTUwIiBmaWxsPSIjNzc5ODhiIi8+PHRleHQgeD0iMzAiIHk9IjQ1IiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjIwIiBmb250LXdlaWdodD0iNzAwIj5ERU1PIExJU1RJTkc8L3RleHQ+PHRleHQgeD0iMzAiIHk9IjM3MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNyIgZm9udC13ZWlnaHQ9IjcwMCI+Q2VudHJhbCBCdXNpbmVzcyBIdWI8L3RleHQ+PHRleHQgeD0iMzAiIHk9IjM5MiIgZmlsbD0iI2RjZWJlMyIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIj5Db21tZXJjaWFsIHNwYWNlIOKAoiBNdW1iYWk8L3RleHQ+PC9zdmc+'}]}
+    ],
     'customers': [],
     'leads': [],
     'visits': [],
@@ -114,10 +121,11 @@ def get_session_history(d, session_id, limit=8):
 
 
 def append_session_message(session_id, item):
-    hist = _SESSION_CACHE.setdefault(session_id, [])
-    hist.append(item)
-    if len(hist) > 20:
-        del hist[:-20]
+    with _SESSION_LOCK:
+        hist = _SESSION_CACHE.setdefault(session_id, [])
+        hist.append(item)
+        if len(hist) > 20:
+            del hist[:-20]
 
 
 def now():
@@ -177,11 +185,6 @@ def owner(request: Request):
 
 
 def customer(request: Request):
-    p = verify(request.cookies.get(CUSTOMER_COOKIE, ''), 'customer')
-    if not p:
-        raise HTTPException(401, 'Customer login required')
-    return p
-    def customer(request: Request):
     p = verify(request.cookies.get(CUSTOMER_COOKIE, ''), 'customer')
     if not p:
         raise HTTPException(401, 'Customer login required')
@@ -275,7 +278,6 @@ class Lead(BaseModel):
     consent: bool = True
     customer_id: str = ''
 
-
 class Visit(BaseModel):
     name: str = Field(min_length=2)
     phone: str = Field(min_length=5)
@@ -331,7 +333,10 @@ class StatusUpdate(BaseModel):
     @field_validator('status')
     @classmethod
     def validate_status(cls, v):
-        allowed = {'New', 'Contacted', 'Visit Scheduled', 'Negotiation', 'Closed', 'Lost', 'Pending', 'Confirmed', 'Rescheduled', 'Completed', 'Cancelled'}
+        allowed = {
+            'New', 'Contacted', 'Visit Scheduled', 'Negotiation', 'Closed', 'Lost', 'Qualified', 'Won',
+            'Pending', 'Confirmed', 'Rescheduled', 'Completed', 'Cancelled'
+        }
         if v not in allowed:
             raise ValueError('Invalid status')
         return v
@@ -353,6 +358,7 @@ def health():
     return {'ok': True, 'version': app.version, 'time': now()}
 
 
+# ---------- Auth ----------
 @app.post('/api/auth/login')
 def owner_login(x: Login):
     if x.username != OWNER_USER or not hmac.compare_digest(x.password, OWNER_PASS):
@@ -418,7 +424,9 @@ def customer_me(c=Depends(customer)):
     if not x:
         raise HTTPException(404, 'Customer not found')
     return {k: v for k, v in x.items() if k != 'password_hash'}
-    @app.put('/api/customer/me')
+
+
+@app.put('/api/customer/me')
 def customer_update(x: CustomerProfile, c=Depends(customer)):
     d = load()
     z = next((q for q in d['customers'] if q['id'] == c['u']), None)
@@ -435,6 +443,7 @@ def customer_update(x: CustomerProfile, c=Depends(customer)):
     return {k: v for k, v in z.items() if k != 'password_hash'}
 
 
+# ---------- Public data ----------
 @app.get('/api/settings')
 def settings():
     s = load()['settings']
@@ -491,6 +500,7 @@ def event(kind: str):
     return {'ok': True}
 
 
+# ---------- Saved properties ----------
 @app.post('/api/customer/saved/{pid}')
 def save_property(pid: str, c=Depends(customer)):
     d = load()
@@ -526,6 +536,7 @@ def customer_activity(c=Depends(customer)):
     }
 
 
+# ---------- Leads / visits ----------
 @app.post('/api/leads')
 def create_lead(l: Lead, request: Request):
     if not l.consent:
@@ -558,6 +569,7 @@ def create_visit(v: Visit, request: Request):
     return {'ok': True, 'visit': item, 'message': 'Request submitted. The property team will confirm the visit.'}
 
 
+# ---------- AI ----------
 @app.post('/api/chat')
 def chat(c: Chat, request: Request):
     d = load()
@@ -582,9 +594,28 @@ def chat(c: Chat, request: Request):
         'ID:' + p['id'] + ' | ' + str(p.get('title', '')) + ' | ' + str(p.get('purpose', '')) + ' | ' + str(p.get('type', '')) + ' | ' + str(p.get('bhk', '')) + ' | Rs ' + str(p.get('price', '')) + ' | ' + str(p.get('location', '')) + ' | ' + str(p.get('area', '')) + ' | ' + str(p.get('status', '')) + ' | Amenities: ' + ', '.join(p.get('amenities', []))
         for p in (candidates or published[:12])
     ])
+
     s = d['settings']
-    system = (s.get('ai_business_context') or DEFAULT['settings']['ai_business_context']) + \
-        '\n\nBusiness: ' + str(s.get('brand')) + '. Owner: ' + str(s.get('owner_name')) + ', phone ' + str(s.get('phone')) + ', WhatsApp ' + str(s.get('whatsapp')) + '. Hours: ' + str(s.get('business_hours')) + '.\n\nCURRENT PUBLISHED PROPERTY DATA:\n' + context + '\n\nRules:\n1. Reply in the same language the customer uses.\n2. Use ONLY published property data above. Never invent facts.\n3. If a fact is not in the data, say you do not have confirmed information.\n4. Never reveal unpublished properties or private owner data.\n5. Guide customers to Call / WhatsApp / Site Visit when relevant.\n6. Keep answers natural and professional.'
+    business_info = (
+        '\n\nBusiness: ' + str(s.get('brand', '')) + '.'
+        + ' Owner/contact: ' + str(s.get('owner_name', ''))
+        + ', phone ' + str(s.get('phone', ''))
+        + ', WhatsApp ' + str(s.get('whatsapp', ''))
+        + '. Hours: ' + str(s.get('business_hours', ''))
+        + '. About: ' + str(s.get('about', '')) + '.'
+    )
+    rules = (
+        '\n\nCURRENT PUBLISHED PROPERTY DATA:\n' + context + '\n\n'
+        'Rules:\n'
+        '1. Reply in the SAME language the customer uses (English, Hindi, Hinglish, Marathi, Tamil, Bengali, Telugu, Kannada, Gujarati, Punjabi, Malayalam, Urdu, or any other language).\n'
+        '2. Use ONLY the published property data above. Never invent price, availability, location, legal facts or owner data.\n'
+        '3. If a fact is not in this data or settings, say you do not have confirmed information.\n'
+        '4. Never reveal unpublished properties or private owner dashboard data.\n'
+        '5. Guide customers to Call / WhatsApp / Site Visit when relevant.\n'
+        '6. Keep answers natural, professional, sales-assistant-like - not robotic.\n'
+        '7. For general real estate advice (loans, registration, vastu, locality), you may answer helpfully but always clarify it is not legal or professional consultation.'
+    )
+    system = (s.get('ai_business_context') or DEFAULT['settings']['ai_business_context']) + business_info + rules
 
     history = get_session_history(d, sid, limit=8)
     messages = [{'role': 'system', 'content': system}]
@@ -595,7 +626,7 @@ def chat(c: Chat, request: Request):
     answer = groq(messages)
     if not answer:
         if candidates:
-            answer = 'I found ' + str(len(candidates)) + ' published property option(s) that may match. Open the cards below to compare. Tell me your budget, location and BHK to narrow it down.'
+            answer = 'I found ' + str(len(candidates)) + ' published property option(s) that may match. Open the property cards below to compare. Tell me your budget, location and BHK to narrow it down.'
         elif any(x in low for x in ['number', 'phone', 'contact', 'call', 'whatsapp']):
             answer = 'You can contact ' + str(s.get('owner_name') or s.get('brand')) + ' on ' + str(s.get('phone') or 'the phone number shown on the website') + ' or use the WhatsApp button.'
         else:
@@ -614,6 +645,7 @@ def chat(c: Chat, request: Request):
     return resp
 
 
+# ---------- Owner ----------
 @app.get('/api/owner/data')
 def owner_data(_: dict = Depends(owner)):
     d = load()
@@ -708,6 +740,8 @@ async def image_upload(pid: str, file: UploadFile = File(...), _: dict = Depends
             cloudinary.config(cloudinary_url=CLOUDINARY_URL)
             result = cloudinary.uploader.upload(raw, folder='estateai/properties', resource_type='image', public_id=Path(file.filename or 'image').stem + '_' + uuid.uuid4().hex[:8])
             image['url'] = result.get('secure_url', '')
+        except ImportError:
+            image['data'] = 'data:' + file.content_type + ';base64,' + base64.b64encode(raw).decode()
         except Exception as e:
             raise HTTPException(502, 'Image storage upload failed: ' + str(e))
     else:
@@ -727,6 +761,17 @@ def image_delete(pid: str, image_id: str, _: dict = Depends(owner)):
     p['images'] = [x for x in p.get('images', []) if x.get('id') != image_id]
     save(d)
     return p
+
+
+@app.post('/api/owner/demo-data/remove')
+def remove_demo_data(_: dict = Depends(owner)):
+    d = load()
+    before = len(d['properties'])
+    d['properties'] = [p for p in d['properties'] if not p.get('is_demo')]
+    removed = before - len(d['properties'])
+    audit(d, 'demo_data.removed', {'count': removed})
+    save(d)
+    return {'ok': True, 'removed': removed}
 
 
 @app.post('/api/owner/leads/{lid}/status')
