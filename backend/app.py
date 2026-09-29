@@ -341,7 +341,9 @@ class CustomerProfile(BaseModel):
 @app.get('/')
 def home():
     return FileResponse(ROOT / 'frontend' / 'index.html')
-    @app.get('/api/health')
+
+
+@app.get('/api/health')
 def health():
     return {'ok': True, 'version': app.version, 'time': now()}
 
