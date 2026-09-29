@@ -46,7 +46,6 @@ ph = PasswordHasher()
 _SESSION_CACHE = {}
 _SESSION_LOCK = threading.Lock()
 
-# Rate limiting (in-memory, per IP)
 _RATE_LIMIT = defaultdict(list)
 _RATE_WINDOW = 60
 _RATE_MAX = 15
@@ -72,16 +71,21 @@ DEFAULT = {
         'ai_business_context': (
             'You are a professional real-estate assistant for this business. '
             'You help customers in 3 ways: '
-            '(1) PROPERTY SEARCH — when customer asks for properties by location, budget, BHK, type, '
+            '(1) PROPERTY SEARCH - when customer asks for properties by location, budget, BHK, type, '
             'search published property data and show matching options with price, location, area, amenities. '
-            '(2) GENERAL KNOWLEDGE — when customer asks about EMI, home loans, RERA, stamp duty, '
-            'registration process, documents, taxes — answer helpfully using your knowledge. '
-            '(3) LOCALITY & MARKET — when customer asks about an area (schools, safety, connectivity, '
+            '(2) GENERAL KNOWLEDGE - when customer asks about EMI, home loans, RERA, stamp duty, '
+            'registration process, documents, taxes - answer helpfully using your knowledge. '
+            '(3) LOCALITY and MARKET - when customer asks about an area (schools, safety, connectivity, '
             'investment potential), give helpful context. '
             'RULES: For property-specific facts use ONLY published property data. '
             'Never invent property facts, prices, availability, or legal claims. '
             'For general questions answer confidently. '
-            'Reply in the SAME language as the customer (Hindi/English/Hinglish). '
+            'LANGUAGE RULE (CRITICAL): Always detect the language of the customer message and reply in EXACTLY the same language. '
+            'If customer writes in Hindi (Devanagari), reply in Hindi. '
+            'If customer writes in Hinglish (Roman Hindi like "kya haal hai"), reply in Hinglish. '
+            'If customer writes in English, reply in English. '
+            'If customer writes in Tamil, Telugu, Marathi, Bengali, Gujarati, Punjabi, Urdu, Arabic, Spanish, French, German, or ANY other language, reply in that SAME language. '
+            'NEVER switch languages on your own. Match the customer tone too: casual, formal, or friendly. '
             'Keep replies short (2-5 lines). Use bullet points for multiple properties. '
             'Always end with a call-to-action: call, WhatsApp, or site visit.'
         ),
@@ -229,19 +233,13 @@ def chat_session(request: Request):
         return token, False
     return 's_' + uuid.uuid4().hex, True
 
-# ============================================================
-# SMART GROQ ROUTER
-# ============================================================
 def detect_query_type(message: str, has_image: bool = False) -> str:
-    """Decide which model to use based on query."""
     if has_image:
         return 'vision'
     text = message.lower()
-    # Property search keywords
     property_kw = ['bhk', 'flat', 'apartment', 'villa', 'plot', 'property', 'rent', 'buy',
                    'under', 'lakh', 'crore', 'sqft', 'sq ft', 'pune', 'mumbai', 'bangalore',
                    'delhi', 'hyderabad', 'location', 'price', 'budget']
-    # Complex/reasoning keywords
     complex_kw = ['emi', 'loan', 'rera', 'stamp duty', 'registration', 'tax', 'legal',
                   'investment', 'roi', 'appreciation', 'documents', 'process', 'kaise',
                   'kyun', 'kyu', 'explain', 'compare', 'difference', 'best', 'suggest',
@@ -255,13 +253,17 @@ def detect_query_type(message: str, has_image: bool = False) -> str:
         return 'fast'
     return 'fast'
 
-def groq(messages, model=None, image_data=None, query_type=None):
-    """Smart Groq caller with model routing."""
+
+def groq(messages, model=None, image_data=None, query_type=None, _retry=0):
     key = os.getenv('GROQ_API_KEY', '').strip()
+
+    if _retry == 0:
+        print(f"[GROQ DEBUG] key_present={bool(key)} key_len={len(key) if key else 0} key_prefix={key[:8] if key else 'NONE'}...")
+
     if not key:
+        print("[GROQ ERROR] GROQ_API_KEY is missing or empty")
         return None
 
-    # Choose model
     if model:
         chosen = model
     elif query_type == 'vision' or image_data:
@@ -271,7 +273,9 @@ def groq(messages, model=None, image_data=None, query_type=None):
     else:
         chosen = os.getenv('GROQ_FAST_MODEL', 'llama-3.1-8b-instant')
 
-    # If image present, reformat last message
+    if _retry == 0:
+        print(f"[GROQ DEBUG] query_type={query_type} chosen_model={chosen} image={'yes' if image_data else 'no'}")
+
     if image_data:
         messages = [dict(m) for m in messages]
         last = messages[-1]
@@ -294,19 +298,29 @@ def groq(messages, model=None, image_data=None, query_type=None):
             timeout=35,
         )
         if r.ok:
-            return r.json()['choices'][0]['message']['content']
+            data = r.json()
+            answer = data['choices'][0]['message']['content']
+            print(f"[GROQ SUCCESS] model={chosen} answer_len={len(answer)}")
+            return answer
         else:
-            # Fallback to fast model on error
-            if chosen != os.getenv('GROQ_FAST_MODEL', 'llama-3.1-8b-instant'):
-                return groq(messages, model=os.getenv('GROQ_FAST_MODEL', 'llama-3.1-8b-instant'), image_data=image_data)
-    except Exception:
-        pass
+            print(f"[GROQ ERROR] model={chosen} status={r.status_code} body={r.text[:500]}")
+            fast_model = os.getenv('GROQ_FAST_MODEL', 'llama-3.1-8b-instant')
+            if chosen != fast_model and _retry < 2:
+                print(f"[GROQ FALLBACK] retrying with {fast_model}")
+                return groq(messages, model=fast_model, image_data=image_data, _retry=_retry + 1)
+    except requests.exceptions.Timeout:
+        print(f"[GROQ EXCEPTION] Timeout after 35s model={chosen}")
+    except requests.exceptions.ConnectionError as e:
+        print(f"[GROQ EXCEPTION] ConnectionError: {str(e)[:300]}")
+    except Exception as e:
+        print(f"[GROQ EXCEPTION] {type(e).__name__}: {str(e)[:500]}")
+
     return None
 
 # ============================================================
 # FASTAPI APP
 # ============================================================
-app = FastAPI(title='EstateAI — Premium AI Real Estate Sales Platform', version='4.0.0')
+app = FastAPI(title='EstateAI - Premium AI Real Estate Sales Platform', version='5.0.0')
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', '').split(',') if o.strip()]
 if ALLOWED_ORIGINS:
@@ -316,9 +330,7 @@ if ALLOWED_ORIGINS:
         allow_methods=['*'],
         allow_headers=['*'],
         allow_credentials=True,
-    )
-
-# ============================================================
+                )# ============================================================
 # PYDANTIC MODELS
 # ============================================================
 class Login(BaseModel):
@@ -365,6 +377,8 @@ class Lead(BaseModel):
     source: str = 'Website'
     consent: bool = True
     customer_id: str = ''
+
+
 class Visit(BaseModel):
     name: str = Field(min_length=2)
     phone: str = Field(min_length=5)
@@ -396,6 +410,7 @@ class Visit(BaseModel):
             raise ValueError('Time must be HH:MM')
         return v
 
+
 class Settings(BaseModel):
     brand: str = 'EstateAI'
     tagline: str = ''
@@ -412,6 +427,7 @@ class Settings(BaseModel):
     hero_image: str = ''
     ai_business_context: str = ''
 
+
 class StatusUpdate(BaseModel):
     status: str
 
@@ -424,24 +440,68 @@ class StatusUpdate(BaseModel):
             raise ValueError('Invalid status')
         return v
 
+
 class CustomerProfile(BaseModel):
     name: str
     phone: str = ''
     email: str = ''
 
+
 # ============================================================
-# ROUTES — BASIC
+# ROUTES - BASIC
 # ============================================================
 @app.get('/')
 def home():
     return FileResponse(ROOT / 'frontend' / 'index.html')
 
+
 @app.get('/api/health')
 def health():
-    return {'ok': True, 'version': app.version, 'time': now()}
+    key = os.getenv('GROQ_API_KEY', '').strip()
+    return {
+        'ok': True,
+        'version': app.version,
+        'time': now(),
+        'groq_key_present': bool(key),
+        'groq_key_length': len(key),
+        'text_model': os.getenv('GROQ_TEXT_MODEL', 'not-set'),
+        'fast_model': os.getenv('GROQ_FAST_MODEL', 'not-set'),
+        'vision_model': os.getenv('GROQ_VISION_MODEL', 'not-set'),
+    }
+
+
+@app.get('/api/test-groq')
+def test_groq():
+    key = os.getenv('GROQ_API_KEY', '').strip()
+    if not key:
+        return {'ok': False, 'error': 'GROQ_API_KEY not set', 'key_length': 0}
+
+    model = os.getenv('GROQ_FAST_MODEL', 'llama-3.1-8b-instant')
+    try:
+        r = requests.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+            json={
+                'model': model,
+                'messages': [{'role': 'user', 'content': 'Say hello in Hindi'}],
+                'max_completion_tokens': 50,
+            },
+            timeout=20,
+        )
+        return {
+            'ok': r.ok,
+            'status': r.status_code,
+            'model': model,
+            'key_length': len(key),
+            'key_prefix': key[:8] + '...' if len(key) > 8 else 'too-short',
+            'response': r.text[:800],
+        }
+    except Exception as e:
+        return {'ok': False, 'error': f'{type(e).__name__}: {str(e)[:500]}'}
+
 
 # ============================================================
-# ROUTES — AUTH
+# ROUTES - AUTH
 # ============================================================
 @app.post('/api/auth/login')
 def owner_login(x: Login):
@@ -456,12 +516,14 @@ def owner_login(x: Login):
     save(d)
     return r
 
+
 @app.post('/api/auth/logout')
 def logout():
     r = JSONResponse({'ok': True})
     r.delete_cookie(COOKIE, path='/')
     r.delete_cookie(CUSTOMER_COOKIE, path='/')
     return r
+
 
 @app.get('/api/auth/me')
 def me(request: Request):
@@ -475,6 +537,7 @@ def me(request: Request):
         'username': o.get('u') if o else None,
         'customer': cust,
     }
+
 
 @app.post('/api/customer/signup')
 def customer_signup(x: CustomerSignup):
@@ -494,6 +557,7 @@ def customer_signup(x: CustomerSignup):
                  samesite=COOKIE_SAMESITE, path='/')
     return r
 
+
 @app.post('/api/customer/login')
 def customer_login(x: CustomerLogin):
     d = load()
@@ -509,6 +573,7 @@ def customer_login(x: CustomerLogin):
                  samesite=COOKIE_SAMESITE, path='/')
     return r
 
+
 @app.get('/api/customer/me')
 def customer_me(c=Depends(customer)):
     d = load()
@@ -516,6 +581,7 @@ def customer_me(c=Depends(customer)):
     if not x:
         raise HTTPException(404, 'Customer not found')
     return {k: v for k, v in x.items() if k != 'password_hash'}
+
 
 @app.put('/api/customer/me')
 def customer_update(x: CustomerProfile, c=Depends(customer)):
@@ -533,13 +599,15 @@ def customer_update(x: CustomerProfile, c=Depends(customer)):
     save(d)
     return {k: v for k, v in z.items() if k != 'password_hash'}
 
+
 # ============================================================
-# ROUTES — PUBLIC
+# ROUTES - PUBLIC
 # ============================================================
 @app.get('/api/settings')
 def settings():
     s = load()['settings']
     return {k: v for k, v in s.items() if k not in ['ai_business_context']}
+
 
 @app.get('/api/properties')
 def properties(q: str = '', location: str = '', ptype: str = '', purpose: str = '',
@@ -569,6 +637,7 @@ def properties(q: str = '', location: str = '', ptype: str = '', purpose: str = 
         arr = [p for p in arr if float(p.get('price', 0) or 0) <= max_price]
     return arr
 
+
 @app.get('/api/properties/{pid}')
 def property_detail(pid: str):
     d = load()
@@ -581,6 +650,7 @@ def property_detail(pid: str):
     save(d)
     return p
 
+
 @app.post('/api/events/{kind}')
 def event(kind: str):
     d = load()
@@ -589,9 +659,8 @@ def event(kind: str):
         d['metrics'][key] = d['metrics'].get(key, 0) + 1
         audit(d, 'public.' + kind)
     save(d)
-    return {'ok': True}
-    # ============================================================
-# ROUTES — SAVED / ACTIVITY
+    return {'ok': True}# ============================================================
+# ROUTES - SAVED / ACTIVITY
 # ============================================================
 @app.post('/api/customer/saved/{pid}')
 def save_property(pid: str, c=Depends(customer)):
@@ -606,6 +675,7 @@ def save_property(pid: str, c=Depends(customer)):
     save(d)
     return z['saved']
 
+
 @app.delete('/api/customer/saved/{pid}')
 def unsave_property(pid: str, c=Depends(customer)):
     d = load()
@@ -613,6 +683,7 @@ def unsave_property(pid: str, c=Depends(customer)):
     z['saved'] = [x for x in z.get('saved', []) if x != pid]
     save(d)
     return z['saved']
+
 
 @app.get('/api/customer/activity')
 def customer_activity(c=Depends(customer)):
@@ -625,8 +696,9 @@ def customer_activity(c=Depends(customer)):
         'messages': [x for x in d['messages'] if x.get('customer_id') == cid],
     }
 
+
 # ============================================================
-# ROUTES — LEADS / VISITS
+# ROUTES - LEADS / VISITS
 # ============================================================
 @app.post('/api/leads')
 def create_lead(l: Lead, request: Request):
@@ -647,6 +719,7 @@ def create_lead(l: Lead, request: Request):
     save(d)
     return item
 
+
 @app.post('/api/visits')
 def create_visit(v: Visit, request: Request):
     if not v.consent:
@@ -666,11 +739,11 @@ def create_visit(v: Visit, request: Request):
     save(d)
     return {'ok': True, 'visit': item, 'message': 'Request submitted. The property team will confirm the visit.'}
 
+
 # ============================================================
-# ROUTES — AI CHAT (SMART)
+# ROUTES - AI CHAT (SMART + MULTILINGUAL)
 # ============================================================
 def parse_price_from_text(text: str):
-    """Extract price from natural language like '70 lakh' or '1.2 crore'."""
     t = text.lower().replace(',', '')
     m = re.search(r'(\d+\.?\d*)\s*(lakh|lac|l\b)', t)
     if m:
@@ -683,9 +756,11 @@ def parse_price_from_text(text: str):
         return float(m.group(1))
     return None
 
+
 def extract_bhk(text: str):
     m = re.search(r'(\d+)\s*(bhk|bedroom)', text.lower())
     return f"{m.group(1)} BHK" if m else None
+
 
 @app.post('/api/chat')
 def chat(c: Chat, request: Request):
@@ -698,7 +773,8 @@ def chat(c: Chat, request: Request):
     msg = c.message.strip()
     low = msg.lower()
 
-    # Smart candidate search
+    print(f"[CHAT] session={sid} msg={msg[:80]} published_count={len(published)}")
+
     candidates = []
     for p in published:
         blob = json.dumps(p, ensure_ascii=False).lower()
@@ -709,14 +785,12 @@ def chat(c: Chat, request: Request):
         if score:
             candidates.append((score, p))
 
-    # If price mentioned, filter by price
     price = parse_price_from_text(low)
     if price:
         filtered = [p for _, p in candidates if float(p.get('price', 0) or 0) <= price * 1.1]
         if filtered:
             candidates = [(1, p) for p in filtered]
 
-    # If BHK mentioned, filter by BHK
     bhk = extract_bhk(low)
     if bhk:
         filtered = [p for _, p in candidates if bhk.lower() in str(p.get('bhk', '')).lower()]
@@ -727,7 +801,7 @@ def chat(c: Chat, request: Request):
 
     context = '\n'.join([
         f"ID:{p['id']} | {p.get('title')} | {p.get('purpose','')} | {p.get('type','')} | "
-        f"{p.get('bhk','')} | ₹{p.get('price','')} | {p.get('location','')} | "
+        f"{p.get('bhk','')} | Rs.{p.get('price','')} | {p.get('location','')} | "
         f"{p.get('area','')} | {p.get('status','')} | Amenities:{', '.join(p.get('amenities',[]))}"
         for p in (candidates or published[:12])
     ])
@@ -750,7 +824,7 @@ STRICT RULES:
 1. For property-specific facts (price, availability, amenities, location), use ONLY the data above.
 2. For general questions (EMI, loans, RERA, legal, market, locality), answer helpfully from your knowledge.
 3. Never invent property facts. Never reveal unpublished properties or owner dashboard data.
-4. Reply in the SAME language as the customer (Hindi/English/Hinglish).
+4. LANGUAGE RULE (CRITICAL): Detect the customer's language and reply in EXACTLY the same language. Support ALL languages: Hindi, Hinglish, English, Tamil, Telugu, Marathi, Bengali, Gujarati, Punjabi, Urdu, Arabic, Spanish, French, German, Chinese, Japanese, and others. Never switch to a different language unless the customer does.
 5. Keep replies short (2-5 lines). Use bullet points for multiple properties.
 6. Always end with a call-to-action: call, WhatsApp, or site visit.
 """
@@ -764,12 +838,11 @@ STRICT RULES:
         ]
     messages.append({'role': 'user', 'content': msg})
 
-    # Smart routing
     qtype = detect_query_type(msg, has_image=bool(c.image_data))
     answer = groq(messages, image_data=c.image_data or None, query_type=qtype)
 
-    # Fallback if AI fails
     if not answer:
+        print(f"[CHAT FALLBACK] Groq returned None, using fallback for qtype={qtype}")
         if candidates:
             answer = (f"Maine {len(candidates)} published property option(s) dhundhe jo aapki requirement se match karte hain. "
                       f"Price, location aur amenities compare karne ke liye neeche cards dekhein. "
@@ -804,14 +877,16 @@ STRICT RULES:
                         samesite=COOKIE_SAMESITE, path='/')
     return resp
 
+
 # ============================================================
-# ROUTES — OWNER
+# ROUTES - OWNER
 # ============================================================
 @app.get('/api/owner/data')
 def owner_data(_: dict = Depends(owner)):
     d = load()
     return {k: d[k] for k in ['settings', 'properties', 'customers', 'leads',
                               'visits', 'messages', 'notifications', 'audit', 'metrics']}
+
 
 @app.post('/api/settings')
 def update_settings(s: Settings, _: dict = Depends(owner)):
@@ -820,6 +895,7 @@ def update_settings(s: Settings, _: dict = Depends(owner)):
     audit(d, 'settings.updated')
     save(d)
     return d['settings']
+
 
 @app.post('/api/properties')
 def add_property(p: dict, _: dict = Depends(owner)):
@@ -835,6 +911,7 @@ def add_property(p: dict, _: dict = Depends(owner)):
     audit(d, 'property.created', {'id': p['id']})
     save(d)
     return p
+
 
 @app.put('/api/properties/{pid}')
 def edit_property(pid: str, p: dict, _: dict = Depends(owner)):
@@ -853,6 +930,7 @@ def edit_property(pid: str, p: dict, _: dict = Depends(owner)):
     save(d)
     return p
 
+
 @app.delete('/api/properties/{pid}')
 def delete_property(pid: str, _: dict = Depends(owner)):
     d = load()
@@ -863,6 +941,7 @@ def delete_property(pid: str, _: dict = Depends(owner)):
     audit(d, 'property.deleted', {'id': pid})
     save(d)
     return {'ok': True}
+
 
 @app.post('/api/properties/{pid}/publish')
 def publish(pid: str, published: bool = True, _: dict = Depends(owner)):
@@ -876,6 +955,7 @@ def publish(pid: str, published: bool = True, _: dict = Depends(owner)):
     audit(d, 'property.published' if published else 'property.unpublished', {'id': pid})
     save(d)
     return p
+
 
 @app.post('/api/properties/{pid}/images')
 async def image_upload(pid: str, file: UploadFile = File(...), _: dict = Depends(owner)):
@@ -909,6 +989,7 @@ async def image_upload(pid: str, file: UploadFile = File(...), _: dict = Depends
     save(d)
     return p
 
+
 @app.delete('/api/properties/{pid}/images/{image_id}')
 def image_delete(pid: str, image_id: str, _: dict = Depends(owner)):
     d = load()
@@ -919,6 +1000,7 @@ def image_delete(pid: str, image_id: str, _: dict = Depends(owner)):
     save(d)
     return p
 
+
 @app.post('/api/owner/demo-data/remove')
 def remove_demo_data(_: dict = Depends(owner)):
     d = load()
@@ -928,6 +1010,7 @@ def remove_demo_data(_: dict = Depends(owner)):
     audit(d, 'demo_data.removed', {'count': removed})
     save(d)
     return {'ok': True, 'removed': removed}
+
 
 @app.post('/api/owner/leads/{lid}/status')
 def lead_status(lid: str, x: StatusUpdate, _: dict = Depends(owner)):
@@ -940,6 +1023,7 @@ def lead_status(lid: str, x: StatusUpdate, _: dict = Depends(owner)):
     save(d)
     return z
 
+
 @app.post('/api/owner/visits/{vid}/status')
 def visit_status(vid: str, x: StatusUpdate, _: dict = Depends(owner)):
     d = load()
@@ -951,6 +1035,7 @@ def visit_status(vid: str, x: StatusUpdate, _: dict = Depends(owner)):
     save(d)
     return z
 
+
 @app.post('/api/owner/notifications/read')
 def notifications_read(_: dict = Depends(owner)):
     d = load()
@@ -958,6 +1043,7 @@ def notifications_read(_: dict = Depends(owner)):
         n['read'] = True
     save(d)
     return {'ok': True}
+
 
 @app.get('/api/owner/export')
 def owner_export(_: dict = Depends(owner)):
@@ -967,7 +1053,7 @@ def owner_export(_: dict = Depends(owner)):
         c.pop('password_hash', None)
     return safe
 
+
 @app.get('/api/owner')
 def owner_page(_: dict = Depends(owner)):
     return {'ok': True}
-        
