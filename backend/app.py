@@ -47,13 +47,13 @@ DEFAULT = {
         'phone': '',
         'whatsapp': '',
         'currency': '₹',
-        'ai_greeting': 'Hi! I’m your AI property advisor. Tell me your location, budget, property type or what you are looking for.',
+        'ai_greeting': 'Hi! I am your AI property advisor. Tell me your location, budget, property type or what you are looking for.',
         'business_hours': 'Mon-Sat 9:00 AM-7:00 PM',
         'about': 'A premium AI-powered real estate sales experience.',
         'address': '',
         'logo_url': '',
         'hero_image': '',
-        'ai_business_context': 'You are a professional real-estate sales assistant with 20 years of experience. Be warm, concise and helpful. Use only published property data and public business settings. Never invent property facts, price, availability, location, owner details or legal claims. You may also give general real estate guidance on buying vs renting, home loans, registration process, vastu tips, and locality insights — always clarifying that general advice is not legal or professional consultation. Reply in the same language the customer uses (English, Hindi, Hinglish, Marathi, Tamil, etc.). Help customers search, compare, enquire and book site visits.'
+        'ai_business_context': 'You are a professional real-estate sales assistant with 20 years of experience. Be warm, concise and helpful. Use only published property data and public business settings. Never invent property facts, price, availability, location, owner details or legal claims. You may also give general real estate guidance on buying vs renting, home loans, registration process, vastu tips, and locality insights. Reply in the same language the customer uses (English, Hindi, Hinglish, Marathi, Tamil, etc.). Help customers search, compare, enquire and book site visits.'
     },
     'properties': [],
     'customers': [],
@@ -142,7 +142,7 @@ def normalize_phone(v):
 
 def whatsapp_url(v):
     n = normalize_phone(v).replace('+', '')
-    return f'https://wa.me/{n}' if n else ''
+    return 'https://wa.me/' + n if n else ''
 
 
 def make_token(user, role, days=1):
@@ -181,6 +181,11 @@ def customer(request: Request):
     if not p:
         raise HTTPException(401, 'Customer login required')
     return p
+    def customer(request: Request):
+    p = verify(request.cookies.get(CUSTOMER_COOKIE, ''), 'customer')
+    if not p:
+        raise HTTPException(401, 'Customer login required')
+    return p
 
 
 def optional_customer(request: Request):
@@ -208,7 +213,7 @@ def groq(messages, model=None, image_data=None):
     try:
         r = requests.post(
             'https://api.groq.com/openai/v1/chat/completions',
-            headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+            headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
             json={'model': model, 'messages': messages, 'temperature': 0.25, 'max_completion_tokens': 1400},
             timeout=35
         )
@@ -219,7 +224,7 @@ def groq(messages, model=None, image_data=None):
     return None
 
 
-app = FastAPI(title='EstateAI — Premium AI Real Estate Sales Platform', version='3.0.0')
+app = FastAPI(title='EstateAI - Premium AI Real Estate Sales Platform', version='3.0.0')
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', '').split(',') if o.strip()]
 if ALLOWED_ORIGINS:
@@ -348,7 +353,6 @@ def health():
     return {'ok': True, 'version': app.version, 'time': now()}
 
 
-# ---------- Auth ----------
 @app.post('/api/auth/login')
 def owner_login(x: Login):
     if x.username != OWNER_USER or not hmac.compare_digest(x.password, OWNER_PASS):
@@ -414,9 +418,7 @@ def customer_me(c=Depends(customer)):
     if not x:
         raise HTTPException(404, 'Customer not found')
     return {k: v for k, v in x.items() if k != 'password_hash'}
-
-
-@app.put('/api/customer/me')
+    @app.put('/api/customer/me')
 def customer_update(x: CustomerProfile, c=Depends(customer)):
     d = load()
     z = next((q for q in d['customers'] if q['id'] == c['u']), None)
@@ -433,7 +435,6 @@ def customer_update(x: CustomerProfile, c=Depends(customer)):
     return {k: v for k, v in z.items() if k != 'password_hash'}
 
 
-# ---------- Public data ----------
 @app.get('/api/settings')
 def settings():
     s = load()['settings']
@@ -490,7 +491,6 @@ def event(kind: str):
     return {'ok': True}
 
 
-# ---------- Saved properties ----------
 @app.post('/api/customer/saved/{pid}')
 def save_property(pid: str, c=Depends(customer)):
     d = load()
@@ -526,7 +526,6 @@ def customer_activity(c=Depends(customer)):
     }
 
 
-# ---------- Leads / visits ----------
 @app.post('/api/leads')
 def create_lead(l: Lead, request: Request):
     if not l.consent:
@@ -536,7 +535,7 @@ def create_lead(l: Lead, request: Request):
     cid = c['u'] if c else ''
     item = {'id': uid('lead_'), **l.model_dump(), 'customer_id': cid, 'status': 'New', 'score': 'Warm', 'created_at': now()}
     d['leads'].insert(0, item)
-    d['notifications'].insert(0, {'id': uid('n_'), 'type': 'lead', 'title': 'New customer lead', 'text': f'{l.name} submitted an enquiry', 'at': now(), 'read': False})
+    d['notifications'].insert(0, {'id': uid('n_'), 'type': 'lead', 'title': 'New customer lead', 'text': l.name + ' submitted an enquiry', 'at': now(), 'read': False})
     d['metrics']['enquiries'] += 1
     audit(d, 'lead.created', {'lead_id': item['id'], 'property_id': l.property_id})
     save(d)
@@ -552,14 +551,13 @@ def create_visit(v: Visit, request: Request):
     cid = c['u'] if c else ''
     item = {'id': uid('visit_'), **v.model_dump(), 'customer_id': cid, 'status': 'Pending', 'created_at': now()}
     d['visits'].insert(0, item)
-    d['notifications'].insert(0, {'id': uid('n_'), 'type': 'visit', 'title': 'New site-visit request', 'text': f'{v.name} requested a visit', 'at': now(), 'read': False})
+    d['notifications'].insert(0, {'id': uid('n_'), 'type': 'visit', 'title': 'New site-visit request', 'text': v.name + ' requested a visit', 'at': now(), 'read': False})
     d['metrics']['bookings'] += 1
     audit(d, 'visit.created', {'visit_id': item['id']})
     save(d)
     return {'ok': True, 'visit': item, 'message': 'Request submitted. The property team will confirm the visit.'}
 
 
-# ---------- AI ----------
 @app.post('/api/chat')
 def chat(c: Chat, request: Request):
     d = load()
@@ -581,12 +579,12 @@ def chat(c: Chat, request: Request):
     candidates = [p for _, p in sorted(candidates, key=lambda x: x[0], reverse=True)[:8]]
 
     context = '\n'.join([
-        f"ID:{p['id']} | {p.get('title')} | {p.get('purpose','')} | {p.get('type','')} | {p.get('bhk','')} | ₹{p.get('price','')} | {p.get('location','')} | {p.get('area','')} | {p.get('status','')} | Amenities:{', '.join(p.get('amenities', []))}"
+        'ID:' + p['id'] + ' | ' + str(p.get('title', '')) + ' | ' + str(p.get('purpose', '')) + ' | ' + str(p.get('type', '')) + ' | ' + str(p.get('bhk', '')) + ' | Rs ' + str(p.get('price', '')) + ' | ' + str(p.get('location', '')) + ' | ' + str(p.get('area', '')) + ' | ' + str(p.get('status', '')) + ' | Amenities: ' + ', '.join(p.get('amenities', []))
         for p in (candidates or published[:12])
     ])
     s = d['settings']
     system = (s.get('ai_business_context') or DEFAULT['settings']['ai_business_context']) + \
-        f"\n\nBusiness: {s.get('brand')}. Owner/contact: {s.get('owner_name')}, phone {s.get('phone')}, WhatsApp {s.get('whatsapp')}. Hours: {s.get('business_hours')}. About: {s.get('about')}.\n\nCURRENT PUBLISHED PROPERTY DATA:\n{context}\n\nRules:\n1. Reply in the same language the customer uses (English, Hindi, Hinglish, Marathi, Tamil, Bengali, etc.).\n2. Use ONLY published property data above. Never invent price, availability, location, legal facts or owner data.\n3. If a fact is not in the data, say you do not have confirmed information.\n4. Never reveal unpublished properties or private owner dashboard data.\n5. Guide customers to Call / WhatsApp / Site Visit when relevant.\n6. Keep answers natural, professional, sales-assistant-like — not robotic."
+        '\n\nBusiness: ' + str(s.get('brand')) + '. Owner: ' + str(s.get('owner_name')) + ', phone ' + str(s.get('phone')) + ', WhatsApp ' + str(s.get('whatsapp')) + '. Hours: ' + str(s.get('business_hours')) + '.\n\nCURRENT PUBLISHED PROPERTY DATA:\n' + context + '\n\nRules:\n1. Reply in the same language the customer uses.\n2. Use ONLY published property data above. Never invent facts.\n3. If a fact is not in the data, say you do not have confirmed information.\n4. Never reveal unpublished properties or private owner data.\n5. Guide customers to Call / WhatsApp / Site Visit when relevant.\n6. Keep answers natural and professional.'
 
     history = get_session_history(d, sid, limit=8)
     messages = [{'role': 'system', 'content': system}]
@@ -597,11 +595,11 @@ def chat(c: Chat, request: Request):
     answer = groq(messages)
     if not answer:
         if candidates:
-            answer = f"I found {len(candidates)} published property option(s) that may match what you’re looking for. Open the property cards below to compare price, location, area and amenities. If you want, tell me your budget, preferred location and BHK and I’ll narrow it down."
+            answer = 'I found ' + str(len(candidates)) + ' published property option(s) that may match. Open the cards below to compare. Tell me your budget, location and BHK to narrow it down.'
         elif any(x in low for x in ['number', 'phone', 'contact', 'call', 'whatsapp']):
-            answer = f"You can contact {s.get('owner_name') or s.get('brand')} on {s.get('phone') or 'the phone number shown on the website'} or use the WhatsApp button."
+            answer = 'You can contact ' + str(s.get('owner_name') or s.get('brand')) + ' on ' + str(s.get('phone') or 'the phone number shown on the website') + ' or use the WhatsApp button.'
         else:
-            answer = s.get('ai_greeting') or 'Tell me your preferred location, budget, BHK or property type and I’ll help you find matching published properties.'
+            answer = s.get('ai_greeting') or 'Tell me your preferred location, budget, BHK or property type and I will help you find matching published properties.'
 
     item = {'id': uid('msg_'), 'session_id': sid, 'customer_id': cust['u'] if cust else '', 'user': msg, 'assistant': answer, 'property_id': c.property_id, 'at': now()}
     d['messages'].append(item)
@@ -616,7 +614,6 @@ def chat(c: Chat, request: Request):
     return resp
 
 
-# ---------- Owner ----------
 @app.get('/api/owner/data')
 def owner_data(_: dict = Depends(owner)):
     d = load()
@@ -646,7 +643,9 @@ def add_property(p: dict, _: dict = Depends(owner)):
     audit(d, 'property.created', {'id': p['id']})
     save(d)
     return p
-    @app.put('/api/properties/{pid}')
+
+
+@app.put('/api/properties/{pid}')
 def edit_property(pid: str, p: dict, _: dict = Depends(owner)):
     d = load()
     old = next((x for x in d['properties'] if x['id'] == pid), None)
@@ -700,18 +699,19 @@ async def image_upload(pid: str, file: UploadFile = File(...), _: dict = Depends
         raise HTTPException(400, 'Only image files are allowed')
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(413, f'Max image size is {MAX_UPLOAD_MB} MB')
+        raise HTTPException(413, 'Max image size is ' + str(MAX_UPLOAD_MB) + ' MB')
     image = {'id': uid('img_'), 'name': file.filename, 'url': '', 'data': ''}
     if CLOUDINARY_URL:
         try:
-            import cloudinary, cloudinary.uploader
+            import cloudinary
+            import cloudinary.uploader
             cloudinary.config(cloudinary_url=CLOUDINARY_URL)
-            result = cloudinary.uploader.upload(raw, folder='estateai/properties', resource_type='image', public_id=f"{Path(file.filename or 'image').stem}_{uuid.uuid4().hex[:8]}")
+            result = cloudinary.uploader.upload(raw, folder='estateai/properties', resource_type='image', public_id=Path(file.filename or 'image').stem + '_' + uuid.uuid4().hex[:8])
             image['url'] = result.get('secure_url', '')
         except Exception as e:
-            raise HTTPException(502, f'Image storage upload failed: {e}')
+            raise HTTPException(502, 'Image storage upload failed: ' + str(e))
     else:
-        image['data'] = f"data:{file.content_type};base64,{base64.b64encode(raw).decode()}"
+        image['data'] = 'data:' + file.content_type + ';base64,' + base64.b64encode(raw).decode()
     p.setdefault('images', []).append(image)
     audit(d, 'property.image_uploaded', {'property_id': pid, 'name': file.filename})
     save(d)
@@ -738,7 +738,10 @@ def lead_status(lid: str, x: StatusUpdate, _: dict = Depends(owner)):
     z['status'] = x.status
     audit(d, 'lead.status_updated', {'id': lid, 'status': x.status})
     save(d)
-    return z@app.post('/api/owner/visits/{vid}/status')
+    return z
+
+
+@app.post('/api/owner/visits/{vid}/status')
 def visit_status(vid: str, x: StatusUpdate, _: dict = Depends(owner)):
     d = load()
     z = next((q for q in d['visits'] if q['id'] == vid), None)
@@ -753,7 +756,8 @@ def visit_status(vid: str, x: StatusUpdate, _: dict = Depends(owner)):
 @app.post('/api/owner/notifications/read')
 def notifications_read(_: dict = Depends(owner)):
     d = load()
-    [n.update({'read': True}) for n in d['notifications']]
+    for n in d['notifications']:
+        n['read'] = True
     save(d)
     return {'ok': True}
 
@@ -770,4 +774,3 @@ def owner_export(_: dict = Depends(owner)):
 @app.get('/api/owner')
 def owner_page(_: dict = Depends(owner)):
     return {'ok': True}
-    
