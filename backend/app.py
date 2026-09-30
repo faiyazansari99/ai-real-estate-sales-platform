@@ -807,6 +807,67 @@ def notifications_read(_: dict = Depends(owner)):
     return {'ok': True}
 
 
+@app.delete('/api/owner/leads/{lid}')
+def delete_lead(lid: str, _: dict = Depends(owner)):
+    d = load()
+    before = len(d['leads'])
+    d['leads'] = [x for x in d['leads'] if x['id'] != lid]
+    if len(d['leads']) == before:
+        raise HTTPException(404, 'Lead not found')
+    audit(d, 'lead.deleted', {'id': lid})
+    save(d)
+    return {'ok': True}
+
+
+@app.delete('/api/owner/visits/{vid}')
+def delete_visit(vid: str, _: dict = Depends(owner)):
+    d = load()
+    before = len(d['visits'])
+    d['visits'] = [x for x in d['visits'] if x['id'] != vid]
+    if len(d['visits']) == before:
+        raise HTTPException(404, 'Visit not found')
+    audit(d, 'visit.deleted', {'id': vid})
+    save(d)
+    return {'ok': True}
+
+
+@app.delete('/api/owner/customers/{cid}')
+def delete_customer(cid: str, _: dict = Depends(owner)):
+    d = load()
+    before = len(d['customers'])
+    d['customers'] = [x for x in d['customers'] if x['id'] != cid]
+    if len(d['customers']) == before:
+        raise HTTPException(404, 'Customer not found')
+    audit(d, 'customer.deleted', {'id': cid})
+    save(d)
+    return {'ok': True}
+
+
+@app.delete('/api/owner/chats/{mid}')
+def delete_chat(mid: str, _: dict = Depends(owner)):
+    d = load()
+    before = len(d['messages'])
+    d['messages'] = [x for x in d['messages'] if x['id'] != mid]
+    if len(d['messages']) == before:
+        raise HTTPException(404, 'Chat not found')
+    audit(d, 'chat.deleted', {'id': mid})
+    save(d)
+    return {'ok': True}
+
+
+@app.post('/api/owner/clear/{kind}')
+def clear_collection(kind: str, _: dict = Depends(owner)):
+    allowed = {'leads', 'visits', 'customers', 'messages'}
+    if kind not in allowed:
+        raise HTTPException(400, 'Invalid collection')
+    d = load()
+    count = len(d[kind])
+    d[kind] = []
+    audit(d, 'collection.cleared', {'kind': kind, 'count': count})
+    save(d)
+    return {'ok': True, 'cleared': count}
+
+
 @app.get('/api/owner/export')
 def owner_export(_: dict = Depends(owner)):
     d = load()
